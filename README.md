@@ -1,7 +1,5 @@
 # BioCOMPASS: Integrating Biomarkers into Transformer-Based Immunotherapy Response Prediction
 
----
-
 **BioCOMPASS** extends the COMPASS framework by integrating clinical biomarkers and treatment information to enhance immunotherapy response prediction. This repository builds upon [COMPASS](https://github.com/mims-harvard/COMPASS) by adding support for:
 
 - 🔬 **Treatment indicators** (PD-1, CTLA-4, combination therapy)
