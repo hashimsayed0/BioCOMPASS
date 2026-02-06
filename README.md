@@ -49,13 +49,6 @@ conda activate biocompass
 pip install -r requirements.txt
 ```
 
-### Adding BioCOMPASS to Your Environment
-```python
-import sys
-sys.path.insert(0, '/path/to/BioCOMPASS')
-from compass import PreTrainer, FineTuner, loadcompass
-```
-
 ---
 
 ## Data Acquisition
