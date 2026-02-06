@@ -1,9 +1,5 @@
 # BioCOMPASS: Integrating Biomarkers into Transformer-Based Immunotherapy Response Prediction
 
-[![COMPASS Paper](https://img.shields.io/badge/Paper-COMPASS-yellow)](https://www.medrxiv.org/content/10.1101/2025.05.01.25326820v1)
-[![ProjectPage](https://img.shields.io/badge/ProjectPage-COMPASS-red)](https://www.immuno-compass.com/)
-[![COMPASS Dataset & Model](https://img.shields.io/badge/Dataset&Model-Download-green)](https://www.immuno-compass.com/download/)
-
 ---
 
 **BioCOMPASS** extends the COMPASS framework by integrating clinical biomarkers and treatment information to enhance immunotherapy response prediction. This repository builds upon [COMPASS](https://github.com/mims-harvard/COMPASS) by adding support for:
@@ -362,8 +358,6 @@ This project is licensed under the same terms as the original COMPASS project.
 
 For questions or issues:
 - Open an issue on GitHub
-- Visit the [COMPASS website](https://www.immuno-compass.com/)
-- Contact the [COMPASS team](https://www.immuno-compass.com/about/index.html)
 
 ---
 
