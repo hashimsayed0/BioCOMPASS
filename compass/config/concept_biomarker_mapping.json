@@ -1,0 +1,191 @@
+{
+  "description": "Semantic mapping between COMPASS's 44 biological concepts and external biomarkers from features",
+  "version": "1.0",
+  "mappings": {
+    "0": {
+      "concept_name": "Bcell_general",
+      "biomarkers": ["Bindea_BCells", "Palmer_BCell", "IglesiaVincent_BCell", "Schmidt_BCell", "GO_BCR_Signaling", "Fan_IGG", "Rody_TNBC_BCell"]
+    },
+    "1": {
+      "concept_name": "Memory_Bcell",
+      "biomarkers": ["Bindea_BCells", "Palmer_BCell"]
+    },
+    "2": {
+      "concept_name": "Naive_Bcell",
+      "biomarkers": ["Bindea_BCells", "Palmer_BCell"]
+    },
+    "3": {
+      "concept_name": "Plasma_cell",
+      "biomarkers": ["Vincent_Plasma_Cells", "Fan_IGG"]
+    },
+    "4": {
+      "concept_name": "CD4_Tcell",
+      "biomarkers": ["Palmer_TCell", "Bindea_TCells", "IglesiaVincent_TCell", "Bindea_THelper"]
+    },
+    "5": {
+      "concept_name": "CD8_Tcell",
+      "biomarkers": ["Bindea_CD8_TCells", "Palmer_CD8", "IglesiaVincent_CD8", "TIDE_CD8"]
+    },
+    "6": {
+      "concept_name": "Memory_Tcell",
+      "biomarkers": ["Bindea_Tcm", "Bindea_Tem", "Palmer_TCell", "Bindea_TCells"]
+    },
+    "7": {
+      "concept_name": "Naive_Tcell",
+      "biomarkers": ["Palmer_TCell", "Bindea_TCells"]
+    },
+    "8": {
+      "concept_name": "Tcell_general",
+      "biomarkers": ["Palmer_TCell", "Bindea_TCells", "IglesiaVincent_TCell", "GO_TCR_Signaling", "Rody_TNBC_TCell", "Rody_LCK"]
+    },
+    "9": {
+      "concept_name": "Cytotoxic_Tcell",
+      "biomarkers": ["Bindea_Cytotoxic_Cells", "Cytolytic_Score", "Palmer_CD8", "Bindea_CD8_TCells"]
+    },
+    "10": {
+      "concept_name": "Exhausted_Tcell",
+      "biomarkers": ["TIDE_Dysfunction", "Palmer_CD8"]
+    },
+    "11": {
+      "concept_name": "Immune_checkpoint",
+      "biomarkers": ["TIDE_CD274"]
+    },
+    "12": {
+      "concept_name": "Treg",
+      "biomarkers": ["Bindea_TReg"]
+    },
+    "13": {
+      "concept_name": "NKcell",
+      "biomarkers": ["Bindea_NK_Cells", "Bindea_NK_CD56bright", "Bindea_NK_CD56dim"]
+    },
+    "14": {
+      "concept_name": "Innate_lymphoid_cell",
+      "biomarkers": ["Bindea_NK_Cells"]
+    },
+    "15": {
+      "concept_name": "cDC",
+      "biomarkers": ["Bindea_DC", "Bindea_aDC", "Bindea_iDC"]
+    },
+    "16": {
+      "concept_name": "pDC",
+      "biomarkers": ["Bindea_pDC"]
+    },
+    "17": {
+      "concept_name": "Macrophage",
+      "biomarkers": ["Bindea_Macrophages", "IglesiaVincent_CD68", "Beck_Mac_CSF1", "CSF1_Response", "IglesiaVincent_MacTh1", "TIDE_TAM_M2"]
+    },
+    "18": {
+      "concept_name": "Monocyte",
+      "biomarkers": ["Bindea_Macrophages", "IglesiaVincent_CD68"]
+    },
+    "19": {
+      "concept_name": "Myeloid",
+      "biomarkers": ["Bindea_Macrophages", "Bindea_DC", "Bindea_Neutrophils", "IglesiaVincent_CD68"]
+    },
+    "20": {
+      "concept_name": "Granulocyte",
+      "biomarkers": ["Bindea_Neutrophils", "Bindea_Eosinophils"]
+    },
+    "21": {
+      "concept_name": "Mast",
+      "biomarkers": ["Bindea_Mast_Cells"]
+    },
+    "22": {
+      "concept_name": "Erythrocyte",
+      "biomarkers": []
+    },
+    "23": {
+      "concept_name": "Platelet",
+      "biomarkers": []
+    },
+    "24": {
+      "concept_name": "Stem",
+      "biomarkers": []
+    },
+    "25": {
+      "concept_name": "Stroma",
+      "biomarkers": ["TIDE_CAF"]
+    },
+    "26": {
+      "concept_name": "Pericyte",
+      "biomarkers": []
+    },
+    "27": {
+      "concept_name": "Fibroblast",
+      "biomarkers": ["TIDE_CAF"]
+    },
+    "28": {
+      "concept_name": "Endothelial",
+      "biomarkers": []
+    },
+    "29": {
+      "concept_name": "Epithelial",
+      "biomarkers": []
+    },
+    "30": {
+      "concept_name": "Mesothelial",
+      "biomarkers": []
+    },
+    "31": {
+      "concept_name": "Adipocyte",
+      "biomarkers": []
+    },
+    "32": {
+      "concept_name": "Hepatocyte",
+      "biomarkers": []
+    },
+    "33": {
+      "concept_name": "Pancreatic",
+      "biomarkers": []
+    },
+    "34": {
+      "concept_name": "Pneumocyte",
+      "biomarkers": []
+    },
+    "35": {
+      "concept_name": "Apoptosis_pathway",
+      "biomarkers": []
+    },
+    "36": {
+      "concept_name": "Functional_1",
+      "biomarkers": ["Module3_IFN_Score", "TIDE_IFNG"]
+    },
+    "37": {
+      "concept_name": "Functional_2",
+      "biomarkers": ["TGFB_Score"]
+    },
+    "38": {
+      "concept_name": "Functional_3",
+      "biomarkers": ["ICR", "IE_Specific", "ID_Specific"]
+    },
+    "39": {
+      "concept_name": "Functional_4",
+      "biomarkers": ["KardosChai_ImSuppress", "TIDE_Exclusion", "TIDE_MDSC"]
+    },
+    "40": {
+      "concept_name": "Functional_5",
+      "biomarkers": ["KardosChai_EMT_DOWN", "KardosChai_EMT_UP"]
+    },
+    "41": {
+      "concept_name": "Functional_6",
+      "biomarkers": ["Chan_TIC", "Prat_Claudin"]
+    },
+    "42": {
+      "concept_name": "Functional_7",
+      "biomarkers": ["LIexpression_Score", "Rody_IL8"]
+    },
+    "43": {
+      "concept_name": "Functional_8",
+      "biomarkers": ["Chang_Serum_Response_Up", "Miracle"]
+    }
+  },
+  "notes": {
+    "unmapped_biomarkers": [
+      "TIDE", "TIDE_MSI", "TIDE_CTL", "IMPRES",
+      "Hugo_IPRES26", "Hugo_IPRES22", "Hugo_IPRES08", "Hugo_IPRES06",
+      "All BIOCARTA_CTLA4_V_* and REACTOME_CTLA4_V_* pathway scores (28 features)",
+      "All REACTOME_PD1_V_* pathway scores (14 features)"
+    ],
+    "mapping_strategy": "Semantic alignment between COMPASS concept names and biomarker descriptions. Concepts 36-43 are functional/pathway concepts with less clear biological cell type interpretation."
+  }
+}

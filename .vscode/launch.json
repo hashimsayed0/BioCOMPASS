@@ -1,0 +1,29 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: tune_test_loco.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tune_test_loco.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--cohorts", "Gide_Cell_2019,HugoLo_IPRES_2016,IMmotion150,IMvigor210,Liu_NatMed_2019,Riaz_Nivolumab_2017,VanAllen_antiCTLA4_2015",
+                "--gene_exp_file", "data/gene_exp.tsv",
+                "--labels_file", "data/labels.tsv",
+                "--model_path", "models/pretrainer.pt",
+                "--clinical_features_file", "data/clinical_features.tsv",
+                "--test_cohort", "Gide_Cell_2019",
+                "--treatment_gating_enabled", "True",
+                "--concept_alignment_loss_scale", "0.1",
+                "--pathway_consistency_loss_scale", "0.05",
+                "--auxiliary_task_loss_scale", "0.1",
+                "--biomarker_attention_enabled", "True",
+                "--batch_size", "16",
+                "--max_epochs", "25",
+                "--mode", "PFT"
+            ]
+        }
+    ]
+}
