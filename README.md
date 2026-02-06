@@ -66,7 +66,7 @@ BioCOMPASS uses immunotherapy clinical trial data from the **CRI iAtlas** portal
    |-----------|-------------|--------------|
    | `iatlas-ici-sample_info.tsv` | Sample metadata and response labels | Labels file |
    | `iatlas-ici-features.tsv` | Clinical features and biomarkers | Clinical features |
-   | `iatlas-ici-hgnc_tpm.tsv` | Gene expression (TPM-normalized) | Gene expression data |
+   | `Previous files/iatlas-ici-hgnc_tpm.tsv` | Gene expression (TPM-normalized) | Gene expression data |
 
 5. **Place the files in the `data/` directory** of your BioCOMPASS installation:
    ```bash
@@ -74,7 +74,7 @@ BioCOMPASS uses immunotherapy clinical trial data from the **CRI iAtlas** portal
    # Move or copy downloaded files to data/
    mv iatlas-ici-sample_info.tsv data/labels.tsv
    mv iatlas-ici-features.tsv data/clinical_features.tsv
-   mv iatlas-ici-hgnc_tpm.tsv data/tpm.tsv
+   mv iatlas-ici-hgnc_tpm.tsv data/gene_exp.tsv
    ```
 
 **Note**: All three required files are located in the `Files/Molecular Response to Immune Checkpoint Inhibitors` folder within the Synapse repository.
