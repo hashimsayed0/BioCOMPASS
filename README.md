@@ -59,7 +59,7 @@ BioCOMPASS uses immunotherapy clinical trial data from the **CRI iAtlas** portal
 
 1. **Create a Synapse account** at [https://www.synapse.org](https://www.synapse.org) if you don't have one
 2. **Access the CRI iAtlas data repository**: [syn24200710](https://www.synapse.org/Synapse:syn24200710)
-3. **Navigate to the data folder**: `Files/Molecular Response to Immune Checkpoint Inhibitors`
+3. **Make sure you're in the right data folder**: `Files/Molecular Response to Immune Checkpoint Inhibitors`
 4. **Download the following three files**:
 
    | File Name | Description | Required For |
@@ -138,7 +138,7 @@ TIDE scores, IPRES signatures, phenotype markers:
 
 ### Leave-One-Cohort-Out Cross-Validation
 
-Use the provided script for comprehensive evaluation across cohorts:
+Use the provided script (or configuration in launch.json) for comprehensive evaluation across cohorts:
 
 ```bash
 python tune_test_loco.py \
@@ -152,9 +152,9 @@ python tune_test_loco.py \
     --concept_alignment_loss_scale 0.1 \
     --pathway_consistency_loss_scale 0.05 \
     --auxiliary_task_loss_scale 0.1 \
-    --biomarker_attention_enabled True \
+    --biomarker_attention_enabled False \
     --batch_size 16 \
-    --max_epochs 2 \
+    --max_epochs 25 \
     --with_wandb True
 ```
 
