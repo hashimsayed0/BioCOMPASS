@@ -3,9 +3,7 @@ MIT License
 Copyright (c) 2023 Artificial Intelligence for Medicine and Science @ Harvard
 Copyright (c) 2025 BioCOMPASS Contributors
 
-BioCOMPASS is an extension of COMPASS (Computational Models Predicting Anticancer
-Immunotherapy Success), which was developed by the AI for Medicine and Science
-lab at Harvard University.
+BioCOMPASS is an extension of COMPASS.
 
 Original COMPASS:
 https://github.com/mims-harvard/COMPASS
