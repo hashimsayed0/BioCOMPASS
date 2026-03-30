@@ -36,141 +36,106 @@ CANCER_CODE_PATH = 'compass/tokenizer/cancer_code.json'
 with open(CANCER_CODE_PATH, 'r') as f:
     CANCER_TYPE_TO_CODE = json.load(f)
 
-# Function to discover cohorts from sample info file
-def discover_cohorts(sample_info_file):
-    """Load sample info and discover all cohorts with their cancer types."""
-    df_info = pd.read_csv(sample_info_file, sep='\t', index_col='sample_name')
 
-    # Filter for pre-treatment samples with valid Responder (exclude "na_responder")
-    valid_mask = (
-        (df_info['Responder'] != 'na_responder') &
-        (df_info['Responder'].notna()) &
-        (df_info['Sample_Treatment'] == 'pre_sample_treatment')
-    )
-    df_info_filtered = df_info[valid_mask]
+def _load_and_filter(clinical_features_file, all_cohorts=None):
+    """Load clinical features, apply validity filter, and optionally restrict to given cohorts."""
+    df_info = pd.read_csv(clinical_features_file, sep='\t', index_col='Run_ID')
+
+    df_info_filtered = df_info[
+        df_info['Responder'].notna() &
+        (df_info['Sample_Treatment'] == 'Pre')
+    ]
     print(f"Filtered to {len(df_info_filtered)} pre-treatment samples with valid responder status")
 
-    # Get unique cohorts and their cancer types
-    cohort_cancer_mapping = df_info_filtered.groupby('Dataset')['TCGA_Study'].unique()
+    if all_cohorts is not None:
+        unknown = [c for c in all_cohorts if c not in df_info_filtered['Dataset'].unique()]
+        if unknown:
+            raise ValueError(f"Unknown cohorts in --all_cohorts: {unknown}. "
+                             f"Available: {sorted(df_info_filtered['Dataset'].unique().tolist())}")
+        df_info_filtered = df_info_filtered[df_info_filtered['Dataset'].isin(all_cohorts)]
+        print(f"Cohort pre-filter applied ({len(all_cohorts)} cohorts): {all_cohorts}")
+        print(f"Samples after cohort filter: {len(df_info_filtered)}")
 
-    # Create mapping (assuming each cohort has only one cancer type)
-    cohort_to_cancer = {}
-    valid_cohorts = []
+    return df_info_filtered
 
-    for cohort, tissues in cohort_cancer_mapping.items():
-        # Use the most common tissue type if multiple exist, excluding 'na_tcga_study'
-        tissue_counts = df_info_filtered[df_info_filtered['Dataset'] == cohort]['TCGA_Study'].value_counts()
 
-        # Skip cohorts with no samples
-        if len(tissue_counts) == 0:
-            print(f"Warning: Cohort '{cohort}' has no samples with valid TCGA_Study, skipping...")
-            continue
+def discover_cohorts(clinical_features_file, all_cohorts=None):
+    """Load clinical features and discover all cohorts (LOCO)."""
+    df_info_filtered = _load_and_filter(clinical_features_file, all_cohorts)
+    all_groups = sorted(df_info_filtered['Dataset'].unique().tolist())
+    group_assignments = df_info_filtered['Dataset']
+    return all_groups, group_assignments, df_info_filtered
 
-        # Filter out 'na_tcga_study' if there are other valid options
-        valid_tissues = tissue_counts[tissue_counts.index != 'na_tcga_study']
-        if len(valid_tissues) > 0:
-            cohort_to_cancer[cohort] = valid_tissues.index[0]
-            valid_cohorts.append(cohort)
-        else:
-            # If all are 'na_tcga_study', use it but warn
-            print(f"Warning: Cohort '{cohort}' only has 'na_tcga_study' as cancer type")
-            cohort_to_cancer[cohort] = tissue_counts.index[0]
-            valid_cohorts.append(cohort)
 
-    all_cohorts = sorted(valid_cohorts)
+def discover_cancer_types(clinical_features_file, all_cohorts=None):
+    """Discover unique TCGA cancer types and build group_assignments (LOCTO)."""
+    df_info_filtered = _load_and_filter(clinical_features_file, all_cohorts)
+    all_groups = sorted(df_info_filtered['TCGA_Study'].dropna().unique().tolist())
+    group_assignments = df_info_filtered['TCGA_Study']
+    return all_groups, group_assignments, df_info_filtered
 
-    return all_cohorts, cohort_to_cancer, df_info_filtered
 
-def get_cancer_code(cohort_name, cohort_to_cancer):
-    """Get cancer code for a given cohort."""
-    cancer_type = cohort_to_cancer.get(cohort_name)
-    if cancer_type is None:
-        raise ValueError(f"Unknown cohort: {cohort_name}")
+def discover_ici_target_groups(clinical_features_file, all_cohorts=None):
+    """Discover ICI target groups using ICI_Target from clinical features (LOTO).
 
-    cancer_code = CANCER_TYPE_TO_CODE.get(cancer_type)
-    if cancer_code is None:
-        raise ValueError(f"Cancer type {cancer_type} not found in cancer_code.json")
+    Groups: 'PD-1' (282), 'PD-L1' (463), 'CTLA4' (41), 'CTLA4 + PD1' (32).
+    Samples with NaN ICI_Target are assigned 'unknown'.
+    """
+    df_info_filtered = _load_and_filter(clinical_features_file, all_cohorts)
+    group_assignments = df_info_filtered['ICI_Target'].fillna('unknown')
+    all_groups = sorted(group_assignments.unique().tolist())
+    return all_groups, group_assignments, df_info_filtered
 
-    return cancer_code
 
-def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
-                        df_sample_info_filtered, labels_full, model, expected_genes,
-                        args, wandb_group, val_ratio,
-                        output_dir='example/model', results_dir='example/results'):
-    """Train and test for a single leave-one-cohort-out fold."""
+def train_and_test(test_group, all_groups, group_assignments,
+                   sample_to_cancer_code, df_tpm_full, df_sample_info_filtered,
+                   labels_full, model, expected_genes, args, wandb_group,
+                   val_ratio, setting, output_dir='example/model',
+                   results_dir='example/results'):
+    """Train and test for a single leave-one-group-out fold.
 
+    Works for all settings:
+      loco  — group = cohort name (Dataset column)
+      locto — group = cancer type string (TCGA_Study column)
+      loto  — group = ICI_Target string (PD-1, PD-L1, CTLA4, CTLA4 + PD1)
+    """
+
+    setting_upper = setting.upper()
     print("\n" + "="*80)
-    print(f"COMPASS FINE-TUNING: LEAVE-ONE-COHORT-OUT (iAtlas - Test: {test_cohort})")
+    print(f"COMPASS FINE-TUNING: LEAVE-ONE-{setting_upper[2:]}-OUT (Test group: {test_group})")
     print("="*80)
 
-    # Training cohorts: all except test_cohort
-    train_cohorts = [c for c in all_cohorts if c != test_cohort]
+    # Training groups: all except test_group
+    train_groups = [g for g in all_groups if g != test_group]
 
-    print(f"\nTraining cohorts: {train_cohorts}")
-    print(f"Test cohort: {test_cohort}\n")
+    print(f"\nTraining groups: {train_groups}")
+    print(f"Test group: {test_group}\n")
 
-    # Load and combine training data from all cohorts except test cohort
-    print(f"Loading training data from cohorts: {train_cohorts}...")
-    train_dfs = []
-    train_labels_list = []
-    sample_to_cohort = {}  # Track which cohort each sample belongs to
+    # Identify test samples
+    test_sample_mask = group_assignments == test_group
+    test_samples = group_assignments[test_sample_mask].index
 
-    for cohort in train_cohorts:
-        cohort_mask = df_sample_info_filtered['Dataset'] == cohort
-        cohort_samples = df_sample_info_filtered[cohort_mask].index
+    # Identify training samples
+    train_sample_mask = group_assignments.isin(train_groups)
+    train_samples = group_assignments[train_sample_mask].index
 
-        if len(cohort_samples) > 0:
-            cohort_cancer_type = cohort_to_cancer[cohort]
-            cohort_cancer_code = get_cancer_code(cohort, cohort_to_cancer)
-            print(f"  Loading {cohort} ({cohort_cancer_type}, code={cohort_cancer_code})...")
-
-            # Get TPM data for this cohort
-            df_tpm_cohort = df_tpm_full.loc[cohort_samples]
-
-            # Get labels for this cohort
-            labels_cohort = labels_full.loc[cohort_samples]
-
-            # Track cohort for each sample
-            for sample_id in df_tpm_cohort.index:
-                sample_to_cohort[sample_id] = cohort
-
-            train_dfs.append(df_tpm_cohort)
-            train_labels_list.append(labels_cohort)
-
-            n_responders = np.sum(labels_cohort == 1)
-            n_non_responders = np.sum(labels_cohort == 0)
-            print(f"    Samples: {len(df_tpm_cohort)}, Response: {n_responders}, No Response: {n_non_responders}")
-        else:
-            print(f"    Warning: No samples for {cohort}")
-
-    # Combine all training data
-    print("\nCombining training data...")
-    df_train = pd.concat(train_dfs, axis=0)
-    train_labels = pd.concat(train_labels_list, axis=0)
+    # Load and combine training data
+    print(f"Loading training data ({len(train_samples)} samples)...")
+    df_train = df_tpm_full.loc[train_samples]
+    train_labels = labels_full.loc[train_samples]
 
     print(f"Total training samples: {len(df_train)}")
     print(f"Training Response: {np.sum(train_labels == 1)}")
     print(f"Training No Response: {np.sum(train_labels == 0)}")
 
-    # Print cancer type distribution in training data
-    print("\nCancer type distribution in training data:")
-    cancer_type_counts = {}
-    for sample_id in df_train.index:
-        cohort = sample_to_cohort[sample_id]
-        cancer_type = cohort_to_cancer[cohort]
-        cancer_type_counts[cancer_type] = cancer_type_counts.get(cancer_type, 0) + 1
-    for cancer_type, count in sorted(cancer_type_counts.items()):
-        cancer_code = CANCER_TYPE_TO_CODE[cancer_type]
-        print(f"  {cancer_type} (code={cancer_code}): {count} samples")
+    # Print cancer code distribution in training data
+    print("\nCancer code distribution in training data:")
+    code_counts = df_train.index.map(sample_to_cancer_code).value_counts().sort_index()
+    for code, count in code_counts.items():
+        print(f"  code={code}: {count} samples")
 
     # Load test data
-    test_cancer_type = cohort_to_cancer[test_cohort]
-    test_cancer_code = get_cancer_code(test_cohort, cohort_to_cancer)
-    print(f"\nLoading test data from {test_cohort} ({test_cancer_type}, code={test_cancer_code})...")
-
-    test_mask = df_sample_info_filtered['Dataset'] == test_cohort
-    test_samples = df_sample_info_filtered[test_mask].index
-
+    print(f"\nLoading test data from group '{test_group}' ({len(test_samples)} samples)...")
     df_test_tpm = df_tpm_full.loc[test_samples]
     test_labels = labels_full.loc[test_samples]
 
@@ -185,21 +150,14 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
 
     df_train_aligned = df_train[common_genes_train].reindex(columns=expected_genes, fill_value=0)
 
-    # Handle missing values in aligned training data
     if df_train_aligned.isnull().any().any():
         nan_count = df_train_aligned.isnull().sum().sum()
         print(f"Found {nan_count} missing values in aligned training data, filling with 0")
         df_train_aligned = df_train_aligned.fillna(0)
 
-    # Add cancer_code column based on each sample's cohort
-    # This must be the first column for COMPASS
+    # Add cancer_code column from clinical features TCGA_Study
     print("\nAssigning cancer codes to training samples...")
-    train_cancer_codes = []
-    for sample_id in df_train_aligned.index:
-        cohort = sample_to_cohort[sample_id]
-        cancer_code = get_cancer_code(cohort, cohort_to_cancer)
-        train_cancer_codes.append(cancer_code)
-
+    train_cancer_codes = df_train_aligned.index.map(sample_to_cancer_code).tolist()
     df_train_aligned.insert(0, 'cancer_code', train_cancer_codes)
     print(f"Cancer codes assigned: {set(train_cancer_codes)}")
 
@@ -220,15 +178,15 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
 
     df_test_aligned = df_test_tpm[common_genes_test].reindex(columns=expected_genes, fill_value=0)
 
-    # Handle missing values in aligned test data
     if df_test_aligned.isnull().any().any():
         nan_count = df_test_aligned.isnull().sum().sum()
         print(f"Found {nan_count} missing values in aligned test data, filling with 0")
         df_test_aligned = df_test_aligned.fillna(0)
 
-    # Add cancer_code column for test cohort
-    print(f"Assigning cancer code {test_cancer_code} ({test_cancer_type}) to test samples...")
-    df_test_aligned.insert(0, 'cancer_code', test_cancer_code)
+    # Add cancer_code column for test samples from clinical features TCGA_Study
+    print(f"Assigning cancer codes to test samples...")
+    test_cancer_codes = df_test_aligned.index.map(sample_to_cancer_code).tolist()
+    df_test_aligned.insert(0, 'cancer_code', test_cancer_codes)
 
     # Convert test labels to one-hot encoding
     test_labels_df = pd.DataFrame({
@@ -247,12 +205,11 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
         print(f"CREATING VALIDATION SPLIT (ratio={val_ratio})")
         print(f"{'='*80}")
 
-        # Create combined stratification labels (cohort_response)
+        # Stratify by cohort+response
         stratify_labels = [f"{sample_to_cohort[idx]}_{int(label)}"
                            for idx, label in zip(df_train_aligned.index, train_labels)]
 
         try:
-            # Attempt stratified split
             train_indices, val_indices = train_test_split(
                 range(len(df_train_aligned)),
                 test_size=val_ratio,
@@ -260,7 +217,6 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
                 random_state=args.seed
             )
         except ValueError as e:
-            # Fall back to response-only stratification if cohort+response fails
             print(f"Warning: Stratification by cohort+response failed ({e})")
             print("Falling back to response-only stratification...")
             train_indices, val_indices = train_test_split(
@@ -270,25 +226,21 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
                 random_state=args.seed
             )
 
-        # Split the data
         df_train_split = df_train_aligned.iloc[train_indices]
         df_val_aligned = df_train_aligned.iloc[val_indices]
         train_labels_split = train_labels.iloc[train_indices]
         val_labels = train_labels.iloc[val_indices]
 
-        # Convert validation labels to one-hot
         val_labels_df = pd.DataFrame({
             0: (val_labels == 0).astype(int),
             1: (val_labels == 1).astype(int)
         }, index=val_labels.index)
 
-        # Convert training labels to one-hot
         train_labels_split_df = pd.DataFrame({
             0: (train_labels_split == 0).astype(int),
             1: (train_labels_split == 1).astype(int)
         }, index=train_labels_split.index)
 
-        # Print validation statistics
         print(f"\nTraining set: {len(df_train_split)} samples")
         print(f"  Response: {np.sum(train_labels_split == 1)}")
         print(f"  No Response: {np.sum(train_labels_split == 0)}")
@@ -296,55 +248,46 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
         print(f"\nValidation set: {len(df_val_aligned)} samples")
         print(f"  Response: {np.sum(val_labels == 1)}")
         print(f"  No Response: {np.sum(val_labels == 0)}")
-
-        # Print cohort distribution in validation
-        val_cohort_dist = {}
-        for idx in df_val_aligned.index:
-            cohort = sample_to_cohort[idx]
-            val_cohort_dist[cohort] = val_cohort_dist.get(cohort, 0) + 1
-        print(f"\nValidation cohort distribution:")
-        for cohort, count in sorted(val_cohort_dist.items()):
-            print(f"  {cohort}: {count} samples")
         print(f"{'='*80}\n")
     else:
-        # No validation split - use all training data
         df_train_split = df_train_aligned
         train_labels_split_df = train_labels_df
         df_val_aligned = None
         val_labels_df = None
-    # Fine-tune the model with training data
+
+    # Fine-tune the model
     print("\n" + "="*80)
     print("FINE-TUNING COMPASS MODEL")
     print("="*80)
 
     ft_args = {
-        'mode': args.mode,  # Fine-tuning mode: FFT (Full), PFT (Partial), LFT (Linear)
+        'mode': args.mode,
         'lr': args.lr,
         'batch_size': args.batch_size,
         'num_workers': args.num_workers,
         'max_epochs': args.max_epochs,
         'patience': args.patience,
         'seed': args.seed,
-        'load_decoder': False,  # False because we're loading a pre-trained model, not a fine-tuned one
+        'load_decoder': False,
         'with_wandb': args.with_wandb,
         'wandb_project': args.wandb_project,
         'wandb_entity': args.wandb_entity,
         'wandb_dir': args.wandb_dir,
         'wandb_group': wandb_group,
-        'wandb_name': f"loco_{test_cohort}",
+        'wandb_name': f"{setting}_{test_group}",
         'wandb_config': {
-            'mode': args.mode,  # Fine-tuning mode: FFT (Full), PFT (Partial), LFT (Linear)
+            'setting': setting,
+            'mode': args.mode,
             'lr': args.lr,
             'batch_size': args.batch_size,
             'max_epochs': args.max_epochs,
             'patience': args.patience,
             'seed': args.seed,
             'load_decoder': False,
-            'test_cohort': test_cohort,
-            'train_cohorts': [c for c in all_cohorts if c != test_cohort],
-            'num_cohorts': len(all_cohorts),
+            'test_group': str(test_group),
+            'train_groups': [str(g) for g in all_groups if g != test_group],
+            'num_groups': len(all_groups),
             'val_ratio': val_ratio,
-            # Clinical feature integration configuration
             'clinical_features_file': args.clinical_features_file,
             'treatment_gating_enabled': args.treatment_gating_enabled,
             'concept_alignment_loss_scale': args.concept_alignment_loss_scale,
@@ -353,6 +296,7 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
             'auxiliary_task_loss_scale': args.auxiliary_task_loss_scale,
             'biomarker_attention_enabled': args.biomarker_attention_enabled,
         },
+        'work_dir': output_dir,
         'verbose': False,
 
         # Clinical feature integration parameters
@@ -373,17 +317,14 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
 
     finetuner = FineTuner(model, **ft_args)
 
-    # Fine-tune the model using training data
     print("Starting fine-tuning...")
     if val_ratio == 0:
-        # No validation - use tune()
         finetuner.tune(
             dfcx_train=df_train_aligned,
             dfy_train=train_labels_df,
             min_mcc=0.8
         )
     else:
-        # With validation - use tune_with_test()
         finetuner.tune_with_test(
             dfcx_train=df_train_split,
             dfy_train=train_labels_split_df,
@@ -394,43 +335,33 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
 
     # Evaluate on test data
     print("\n" + "="*80)
-    print(f"EVALUATING ON TEST COHORT ({test_cohort})")
+    print(f"EVALUATING ON TEST GROUP ({test_group})")
     print("="*80)
 
-    # Make predictions using the fine-tuned model
     print("Making predictions on test data...")
-    # Clinical features will be automatically loaded from clinical_feature_loader if it was configured
     _, df_pred = finetuner.predict(df_test_aligned, batch_size=128, num_workers=args.num_workers)
 
-    # Extract prediction scores
     if df_pred.shape[1] == 2:
-        predictions = df_pred.iloc[:, 1].values  # Use column 1 for positive class (Response)
+        predictions = df_pred.iloc[:, 1].values
     else:
         predictions = df_pred.values.flatten()
 
-    # Calculate metrics
     print("\n" + "="*80)
-    print(f"COMPASS EVALUATION RESULTS ON {test_cohort} DATASET")
+    print(f"COMPASS EVALUATION RESULTS ON GROUP '{test_group}'")
     print("="*80)
-    print(f"Dataset: {test_cohort}")
+    print(f"Group: {test_group}")
     print(f"Samples: {len(df_test_aligned)}")
     print(f"Responders: {np.sum(test_labels == 1)}")
     print(f"Non-responders: {np.sum(test_labels == 0)}")
     print()
 
-    # Calculate AUC
     auc = roc_auc_score(test_labels, predictions)
-
-    # Binary predictions using 0.5 threshold
     pred_binary = (predictions > 0.5).astype(int)
-
-    # Calculate classification metrics
     accuracy = accuracy_score(test_labels, pred_binary)
     precision = precision_score(test_labels, pred_binary, zero_division=0)
     recall = recall_score(test_labels, pred_binary, zero_division=0)
     f1 = f1_score(test_labels, pred_binary, zero_division=0)
 
-    # Display results
     print("Performance Metrics:")
     print(f"  AUC:       {auc:.3f}")
     print(f"  Accuracy:  {accuracy:.3f}")
@@ -439,7 +370,6 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
     print(f"  F1-score:  {f1:.3f}")
     print()
 
-    # Prediction statistics
     print("Prediction Statistics:")
     print(f"  Mean prediction score: {np.mean(predictions):.3f}")
     print(f"  Std prediction score:  {np.std(predictions):.3f}")
@@ -447,7 +377,6 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
     print(f"  Max prediction score:  {np.max(predictions):.3f}")
     print("="*80)
 
-    # Log test metrics to W&B if enabled
     if args.with_wandb:
         test_metrics = {
             'test_auc': auc,
@@ -458,31 +387,30 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
             'test_mean_pred': np.mean(predictions),
             'test_std_pred': np.std(predictions),
             'test_n_samples': len(df_test_aligned),
-            'test_n_responders': np.sum(test_labels == 1),
-            'test_n_non_responders': np.sum(test_labels == 0)
+            'test_n_responders': int(np.sum(test_labels == 1)),
+            'test_n_non_responders': int(np.sum(test_labels == 0))
         }
         finetuner.log_test_metrics(test_metrics)
 
-    # Save detailed results
+    # Save detailed results — filename prefix based on setting
     results_df = pd.DataFrame({
         'sample_id': df_test_aligned.index,
         'true_label': test_labels.values,
         'predicted_score': predictions,
         'predicted_binary': pred_binary
     })
-    cohort_short = test_cohort.replace('_', '').lower()
-    results_file = os.path.join(results_dir, f'iatlas_{cohort_short}_pft_predictions.csv')
+    group_short = str(test_group).replace('_', '').lower()
+    results_file = os.path.join(results_dir, f'iatlas_{setting}_{group_short}_predictions.csv')
     os.makedirs(results_dir, exist_ok=True)
     results_df.to_csv(results_file, index=False)
     print(f"\nDetailed results saved to: {results_file}")
 
-    # Finish W&B run for this fold
     if args.with_wandb:
         finetuner.finish_wandb()
 
-    # Return metrics for summary
     return {
-        'test_cohort': test_cohort,
+        'setting': setting,
+        'test_group': str(test_group),
         'n_test_samples': len(df_test_aligned),
         'n_train_samples': len(df_train_aligned),
         'auc': auc,
@@ -496,24 +424,45 @@ def train_and_test_loco(test_cohort, all_cohorts, cohort_to_cancer, df_tpm_full,
 
 
 # Parse command line arguments
-parser = argparse.ArgumentParser(description='Fine-tune COMPASS model with leave-one-cohort-out cross-validation on iAtlas')
-parser.add_argument('--cohorts', type=str,
-                    default='Gide_Cell_2019,HugoLo_IPRES_2016,IMmotion150,IMVigor210,Kim_NatMed_2018,Liu_NatMed_2019,Riaz_Nivolumab_2017,VanAllen_antiCTLA4_2015',
-                    help='Comma-separated list of cohorts to include in LOCO (default: 8 main cohorts)')
-parser.add_argument('--test_cohort', type=str, default=None,
-                    help='Single cohort to test. If specified, runs only this cohort.')
+parser = argparse.ArgumentParser(
+    description='Fine-tune COMPASS model with leave-one-group-out cross-validation. '
+                'Settings: loco (leave-one-cohort-out), locto (leave-one-cancer-type-out), '
+                'loto (leave-one-ICI-target-out).')
+
+# --- Setting ---
+parser.add_argument('--setting', type=str, default='loco',
+                    choices=['loco', 'loto', 'locto'],
+                    help='Cross-validation setting: loco (cohort), loto (ICI target), '
+                         'locto (cancer type) (default: loco)')
+
+# --- Cohort pre-filter (applied before setting-specific group splitting) ---
+parser.add_argument('--all_cohorts', type=str, default=None,
+                    help='Comma-separated list of cohort names (Dataset column) to restrict '
+                         'the data pool. Applied before setting-specific grouping, so LOTO '
+                         'and LOCTO will only use samples from these cohorts.')
+
+# --- Group selection ---
+parser.add_argument('--groups', type=str, default=None,
+                    help='Comma-separated list of group identifiers to include. '
+                         'For loco: cohort names. For locto: TCGA cancer type strings. '
+                         'For loto: ICI target strings (e.g. "PD1,PD-L1"). '
+                         'If not specified, all groups are auto-discovered from data.')
+parser.add_argument('--test_group', type=str, default=None,
+                    help='Single group to test. If specified, runs only this fold. '
+                         'For loto, pass as ICI target string (e.g. "PD1").')
+
+# --- Data paths ---
 parser.add_argument('--gene_exp_file', type=str,
                     default='data/gene_exp.tsv',
                     help='Path to gene expression data file')
-parser.add_argument('--labels_file', type=str,
-                    default='data/labels.tsv',
-                    help='Path to sample info file')
 parser.add_argument('--model_path', type=str, default='models/pretrainer.pt',
                     help='Path to pre-trained model')
 parser.add_argument('--output_dir', type=str, default='models',
                     help='Directory to save fine-tuned models (default: models)')
-parser.add_argument('--results_dir', type=str, default='results',
-                    help='Directory to save prediction results (default: results)')
+parser.add_argument('--results_dir', type=str, default='results/finetune/default',
+                    help='Directory to save prediction results (default: results/finetune/default)')
+
+# --- Training hyperparameters ---
 parser.add_argument('--batch_size', type=int, default=16,
                     help='Batch size for fine-tuning (default: 16)')
 parser.add_argument('--lr', type=float, default=1e-3,
@@ -540,10 +489,9 @@ parser.add_argument('--mode', type=str, default='PFT',
 parser.add_argument('--val_ratio', type=float, default=0.0,
                     help='Validation set ratio (0.0-1.0). If 0, no validation set. (default: 0.0)')
 
-
-# Clinical feature integration parameters
+# --- Clinical feature integration parameters ---
 parser.add_argument('--clinical_features_file', type=str, default=None,
-                    help='Path to clinical features TSV file')
+                    help='Path to clinical features TSV file. Required for loto (ICI target) setting.')
 parser.add_argument('--treatment_gating_enabled', type=str2bool, default=False,
                     help='Enable treatment-aware gating (Strategy 1) (default: False)')
 parser.add_argument('--treatment_gating_hidden_dim', type=int, default=32,
@@ -576,59 +524,89 @@ args = parser.parse_args()
 if not (0.0 <= args.val_ratio < 1.0):
     raise ValueError(f"val_ratio must be between 0.0 and 1.0, got {args.val_ratio}")
 
-# Set random seeds for reproducibility
+# Validate clinical_features_file is provided for settings that need it
+if args.setting == 'loto' and args.clinical_features_file is None:
+    raise ValueError(f"--clinical_features_file is required for --setting {args.setting}")
+
+# Set random seeds
 random.seed(args.seed)
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
-# Discover cohorts from sample info file
-print("Discovering cohorts from sample info file...")
-discovered_cohorts, cohort_to_cancer, df_sample_info_filtered = discover_cohorts(args.labels_file)
+# Discover groups based on setting
+print(f"Setting: {args.setting.upper()} (Leave-One-{args.setting[2:].upper()}-Out)")
+print("Discovering groups from data...")
 
-# Parse cohorts from args (comma-separated string)
-all_cohorts = [c.strip() for c in args.cohorts.split(',')]
-# Validate that all specified cohorts exist in data
-for cohort in all_cohorts:
-    if cohort not in discovered_cohorts:
-        raise ValueError(f"Cohort '{cohort}' not found in data. Available: {', '.join(discovered_cohorts)}")
+all_cohorts_filter = [c.strip() for c in args.all_cohorts.split(',')] if args.all_cohorts else None
 
-print(f"Using {len(all_cohorts)} cohorts:")
-for cohort in all_cohorts:
-    cancer_type = cohort_to_cancer[cohort]
-    n_samples = len(df_sample_info_filtered[df_sample_info_filtered['Dataset'] == cohort])
-    print(f"  {cohort}: {cancer_type} ({n_samples} samples)")
+if args.setting == 'loco':
+    discovered_groups, group_assignments, df_sample_info_filtered = \
+        discover_cohorts(args.clinical_features_file, all_cohorts_filter)
+elif args.setting == 'locto':
+    discovered_groups, group_assignments, df_sample_info_filtered = \
+        discover_cancer_types(args.clinical_features_file, all_cohorts_filter)
+elif args.setting == 'loto':
+    discovered_groups, group_assignments, df_sample_info_filtered = \
+        discover_ici_target_groups(args.clinical_features_file, all_cohorts_filter)
 
-# Select cohorts for LOCO
-if args.test_cohort is not None:
-    # Single cohort mode (for sweeps)
-    if args.test_cohort not in all_cohorts:
-        raise ValueError(f"Test cohort '{args.test_cohort}' not found in cohorts. Available: {', '.join(all_cohorts)}")
-    cohorts_to_test = [args.test_cohort]
-    all_cohorts_pool = all_cohorts
+# group_assignments is already aligned to df_sample_info_filtered from discovery
+group_assignments = group_assignments.reindex(df_sample_info_filtered.index)
+
+# Parse and validate --groups
+if args.groups is not None:
+    # Parse the comma-separated string; cast to int only for loto
+    raw_groups = [g.strip() for g in args.groups.split(',')]
+    all_groups = raw_groups
+    for g in all_groups:
+        if g not in discovered_groups:
+            raise ValueError(f"Group '{g}' not found in data. Available: {discovered_groups}")
 else:
-    cohorts_to_test = all_cohorts
+    # Use all auto-discovered groups
+    all_groups = discovered_groups
+
+print(f"Using {len(all_groups)} groups:")
+for g in all_groups:
+    n_samples = int((group_assignments == g).sum())
+    print(f"  {g}: {n_samples} samples")
+
+# Resolve test_group
+if args.test_group is not None:
+    test_group_val = args.test_group
+    if test_group_val not in all_groups:
+        raise ValueError(f"test_group '{test_group_val}' not in groups list. Available: {all_groups}")
+    groups_to_test = [test_group_val]
+    all_groups_pool = all_groups
+else:
+    groups_to_test = all_groups
+    all_groups_pool = all_groups
 
 print("\n" + "="*80)
-print("LEAVE-ONE-COHORT-OUT CROSS-VALIDATION")
+print(f"LEAVE-ONE-{args.setting[2:].upper()}-OUT CROSS-VALIDATION")
 print("="*80)
-print(f"Number of folds: {len(cohorts_to_test)}")
-print(f"Cohorts to test: {cohorts_to_test}")
+print(f"Number of folds: {len(groups_to_test)}")
+print(f"Groups to test: {groups_to_test}")
 print("="*80)
 
-# Load TPM data (Run_ID as rows, genes as columns)
+# Load TPM data
 print("\nLoading gene expression data...")
 print(f"  Gene expression file: {args.gene_exp_file}")
 df_tpm_full = pd.read_csv(args.gene_exp_file, sep='\t', index_col='Run_ID')
+# df_tpm_full.index = df_tpm_full.index.str.upper()
 print(f"  Gene expression data shape: {df_tpm_full.shape}")
 
-# Align TPM with filtered samples
-common_samples = df_tpm_full.index.intersection(df_sample_info_filtered.index)
-df_tpm_full = df_tpm_full.loc[common_samples]
-df_sample_info_filtered = df_sample_info_filtered.loc[common_samples]
-print(f"  Aligned samples: {len(common_samples)}")
+# Align TPM with filtered samples (indices normalised to uppercase)
+# df_sample_info_filtered.index = df_sample_info_filtered.index.str.upper()
+df_tpm_full = df_tpm_full.loc[df_sample_info_filtered.index]
 
-# Map Responder to binary labels ("true_responder" -> 1, "false_responder" -> 0)
-responder_map = {'true_responder': 1, 'false_responder': 0}
+# Build per-sample cancer code from TCGA_Study column
+sample_to_cancer_code = df_sample_info_filtered['TCGA_Study'].map(CANCER_TYPE_TO_CODE)
+missing = sample_to_cancer_code[sample_to_cancer_code.isna()].index.tolist()
+if missing:
+    print(f"Warning: {len(missing)} samples have no cancer code (missing TCGA_Study), defaulting to -1")
+    sample_to_cancer_code = sample_to_cancer_code.fillna(-1).astype(int)
+
+# Map Responder to binary labels
+responder_map = {True: 1, False: 0}
 labels_full = df_sample_info_filtered['Responder'].map(responder_map)
 
 # Load pre-trained COMPASS model once
@@ -645,45 +623,35 @@ except Exception as e:
     device = 'cpu'
     print("Model loaded on CPU")
 
-# Get the genes expected by the model
 expected_genes = model_template.scaler.scaler.feature_names_in_
 print(f"Model expects {len(expected_genes)} genes")
 
-# Perform LOCO cross-validation
+# Perform cross-validation
 all_results = []
 
-# Generate W&B group name based on timestamp and mode
 import time
-wandb_group = f"loco_{args.mode}_seed{args.seed}_{int(time.time())}"
+wandb_group = f"{args.setting}_{args.mode}_seed{args.seed}_{int(time.time())}"
 
-# Determine the cohort pool for training (all cohorts except test cohort)
-if args.test_cohort is not None:
-    cohort_pool = all_cohorts_pool
-else:
-    cohort_pool = cohorts_to_test
-
-for i, test_cohort in enumerate(cohorts_to_test):
+for i, test_group in enumerate(groups_to_test):
     print(f"\n\n{'#'*80}")
-    print(f"# FOLD {i+1}/{len(cohorts_to_test)}: Testing on {test_cohort}")
+    print(f"# FOLD {i+1}/{len(groups_to_test)}: Testing on group '{test_group}'")
     print(f"{'#'*80}\n")
 
-    # Clear CUDA cache between folds to prevent memory issues
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
-    # Load a fresh copy of the model for each fold
     if i > 0:
         print(f"Loading fresh model from {args.model_path}...")
         model = loadcompass(args.model_path, map_location=device)
     else:
         model = model_template
 
-    # Train and test for this fold
-    fold_results = train_and_test_loco(
-        test_cohort=test_cohort,
-        all_cohorts=cohort_pool,
-        cohort_to_cancer=cohort_to_cancer,
+    fold_results = train_and_test(
+        test_group=test_group,
+        all_groups=all_groups_pool,
+        group_assignments=group_assignments,
+        sample_to_cancer_code=sample_to_cancer_code,
         df_tpm_full=df_tpm_full,
         df_sample_info_filtered=df_sample_info_filtered,
         labels_full=labels_full,
@@ -692,33 +660,31 @@ for i, test_cohort in enumerate(cohorts_to_test):
         args=args,
         wandb_group=wandb_group,
         val_ratio=args.val_ratio,
+        setting=args.setting,
         output_dir=args.output_dir,
         results_dir=args.results_dir
     )
 
     all_results.append(fold_results)
 
-# Print summary of all folds
+# Print summary
 print("\n\n" + "="*80)
-print("LEAVE-ONE-COHORT-OUT CROSS-VALIDATION SUMMARY")
+print(f"LEAVE-ONE-{args.setting[2:].upper()}-OUT CROSS-VALIDATION SUMMARY")
 print("="*80)
 print()
 
-# Create summary DataFrame
 summary_df = pd.DataFrame(all_results)
 
-# Display summary table
-print("Per-Cohort Results:")
+print("Per-Group Results:")
 print("-" * 80)
-print(f"{'Cohort':<20} {'Train N':>8} {'Test N':>8} {'AUC':>8} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8}")
+print(f"{'Group':<25} {'Train N':>8} {'Test N':>8} {'AUC':>8} {'Acc':>8} {'Prec':>8} {'Rec':>8} {'F1':>8}")
 print("-" * 80)
 for _, row in summary_df.iterrows():
-    print(f"{row['test_cohort']:<20} {row['n_train_samples']:>8} {row['n_test_samples']:>8} "
+    print(f"{str(row['test_group']):<25} {row['n_train_samples']:>8} {row['n_test_samples']:>8} "
           f"{row['auc']:>8.3f} {row['accuracy']:>8.3f} {row['precision']:>8.3f} "
           f"{row['recall']:>8.3f} {row['f1']:>8.3f}")
 print("-" * 80)
 
-# Calculate and display overall statistics
 print("\nOverall Statistics:")
 print(f"  Mean AUC:       {summary_df['auc'].mean():.3f} ± {summary_df['auc'].std():.3f}")
 print(f"  Mean Accuracy:  {summary_df['accuracy'].mean():.3f} ± {summary_df['accuracy'].std():.3f}")
@@ -727,12 +693,12 @@ print(f"  Mean Recall:    {summary_df['recall'].mean():.3f} ± {summary_df['reca
 print(f"  Mean F1-score:  {summary_df['f1'].mean():.3f} ± {summary_df['f1'].std():.3f}")
 print()
 print(f"  Total test samples: {summary_df['n_test_samples'].sum()}")
-print(f"  Cohorts tested: {len(summary_df)}")
+print(f"  Groups tested: {len(summary_df)}")
 print("="*80)
 
-# Save summary results
-summary_file = os.path.join(args.results_dir, 'iatlas_loco_summary.csv')
+# Save summary
+summary_file = os.path.join(args.results_dir, f'iatlas_{args.setting}_summary.csv')
 summary_df.to_csv(summary_file, index=False)
 print(f"\nSummary results saved to: {summary_file}")
 
-print("\nLOCO cross-validation completed successfully!")
+print(f"\n{args.setting.upper()} cross-validation completed successfully!")

@@ -45,52 +45,37 @@ warnings.filterwarnings("ignore")
 
 # ── paths ────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data" / "finetune"
+DATA = ROOT / "data"
 GENE_EXP_PATH   = DATA / "gene_exp.tsv"
-LABELS_PATH     = DATA / "labels.tsv"
 CLINICAL_PATH   = DATA / "clinical_features.tsv"
 GENE_TOKEN_PATH = ROOT / "compass" / "tokenizer" / "gene_tokens_long.json"
 
 sys.path.insert(0, str(ROOT))
 
 
-def _load_and_filter(labels_file, all_cohorts=None):
-    df = pd.read_csv(labels_file, sep='\t', index_col='Run_ID')
-    df = df[df['Responder'].notna()]
+def _load_and_filter(clinical_file, all_cohorts=None):
+    df = pd.read_csv(clinical_file, sep='\t', index_col='Run_ID')
+    df = df[df['Responder'].notna() & (df['Sample_Treatment'] == 'Pre')]
     if all_cohorts is not None:
         df = df[df['Dataset'].isin(all_cohorts)]
     return df
 
 
-def _build_cohort_to_cancer(df):
-    return {
-        cohort: df[df['Dataset'] == cohort]['TCGA_Study'].value_counts().index[0]
-        for cohort in df['Dataset'].unique()
-    }
+def discover_cohorts(clinical_file, all_cohorts=None):
+    df = _load_and_filter(clinical_file, all_cohorts)
+    return sorted(df['Dataset'].unique()), df['Dataset'], df
 
 
-def discover_cohorts(labels_file, all_cohorts=None):
-    df = _load_and_filter(labels_file, all_cohorts)
-    return sorted(df['Dataset'].unique()), _build_cohort_to_cancer(df), df['Dataset'], df
+def discover_cancer_types(clinical_file, all_cohorts=None):
+    df = _load_and_filter(clinical_file, all_cohorts)
+    return sorted(df['TCGA_Study'].dropna().unique()), df['TCGA_Study'], df
 
 
-def discover_cancer_types(labels_file, all_cohorts=None):
-    df = _load_and_filter(labels_file, all_cohorts)
-    return sorted(df['TCGA_Study'].dropna().unique()), _build_cohort_to_cancer(df), df['TCGA_Study'], df
-
-
-
-def discover_ici_target_groups(labels_file, clinical_file, all_cohorts=None):
-    """Discover ICI target groups using ICI_Target from clinical features (LOTO).
-
-    Groups: 'PD-1' (282), 'PD-L1' (463), 'CTLA4' (41), 'CTLA4 + PD1' (32).
-    Samples with NaN ICI_Target are assigned 'unknown'.
-    """
-    df = _load_and_filter(labels_file, all_cohorts)
-    df_clin = pd.read_csv(clinical_file, sep='\t', index_col='Run_ID').reindex(df.index)
-    group_assignments = df_clin['ICI_Target'].fillna('unknown')
-    all_groups = sorted(group_assignments.unique().tolist())
-    return all_groups, _build_cohort_to_cancer(df), group_assignments, df
+def discover_ici_target_groups(clinical_file, all_cohorts=None):
+    """Discover ICI target groups using ICI_Target from clinical features (LOTO)."""
+    df = _load_and_filter(clinical_file, all_cohorts)
+    group_assignments = df['ICI_Target'].fillna('unknown')
+    return sorted(group_assignments.unique().tolist()), group_assignments, df
 
 DEFAULT_COHORTS = [
     "Gide_Cell_2019",
@@ -435,18 +420,17 @@ def main(args):
 
     # ── discover groups using the same logic as tune_test.py ─────────────
     print(f"Setting: {args.setting.upper()}")
-    labels_file = str(LABELS_PATH)
     clinical_file = str(CLINICAL_PATH)
 
     if args.setting == "loco":
-        all_groups, cohort_to_cancer, group_assignments, df_info = \
-            discover_cohorts(labels_file, all_cohorts_filter)
+        all_groups, group_assignments, df_info = \
+            discover_cohorts(clinical_file, all_cohorts_filter)
     elif args.setting == "locto":
-        all_groups, cohort_to_cancer, group_assignments, df_info = \
-            discover_cancer_types(labels_file, all_cohorts_filter)
+        all_groups, group_assignments, df_info = \
+            discover_cancer_types(clinical_file, all_cohorts_filter)
     elif args.setting == "loto":
-        all_groups, cohort_to_cancer, group_assignments, df_info = \
-            discover_ici_target_groups(labels_file, clinical_file, all_cohorts_filter)
+        all_groups, group_assignments, df_info = \
+            discover_ici_target_groups(clinical_file, all_cohorts_filter)
 
     group_assignments = group_assignments.reindex(df_info.index)
 

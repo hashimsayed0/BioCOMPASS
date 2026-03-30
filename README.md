@@ -60,41 +60,37 @@ BioCOMPASS uses immunotherapy clinical trial data from the **CRI iAtlas** portal
 1. **Create a Synapse account** at [https://www.synapse.org](https://www.synapse.org) if you don't have one
 2. **Access the CRI iAtlas data repository**: [syn24200710](https://www.synapse.org/Synapse:syn24200710)
 3. **Make sure you're in the right data folder**: `Files/Molecular Response to Immune Checkpoint Inhibitors`
-4. **Download the following three files**:
+4. **Download the following two files**:
 
    | File Name | Description | Required For |
    |-----------|-------------|--------------|
-   | `iatlas-ici-sample_info.tsv` | Sample metadata and response labels | Labels file |
-   | `iatlas-ici-features.tsv` | Clinical features and biomarkers | Clinical features |
+   | `iatlas-ici-features.tsv` | Clinical features, biomarkers, and response labels | Clinical features |
    | `Previous files/iatlas-ici-hgnc_tpm.tsv` | Gene expression (TPM-normalized) | Gene expression data |
 
 5. **Place the files in the `data/` directory** of your BioCOMPASS installation:
    ```bash
    mkdir -p data
    # Move or copy downloaded files to data/
-   mv iatlas-ici-sample_info.tsv data/labels.tsv
    mv iatlas-ici-features.tsv data/clinical_features.tsv
    mv iatlas-ici-hgnc_tpm.tsv data/gene_exp.tsv
    ```
 
-**Note**: All three required files are located in the `Files/Molecular Response to Immune Checkpoint Inhibitors` folder within the Synapse repository.
+**Note**: Both required files are located in the `Files/Molecular Response to Immune Checkpoint Inhibitors` folder within the Synapse repository.
 
 ---
 
 ## Data Preparation
 
-BioCOMPASS requires three main input files in the `data/` directory:
+BioCOMPASS requires two main input files in the `data/` directory:
 
 ### 1. Gene Expression Data (`gene_exp.tsv`)
 - TPM-normalized gene expression matrix
 - Format: First column = cancer type code, remaining 15,672 columns = genes
 - Each row represents one patient sample
 
-### 2. Labels File (`labels.tsv`)
-- Sample metadata and response labels
-- Required columns: `Run_ID`, `Dataset` (cohort), `Responder` (True/False), `TCGA_Study` (cancer type)
-
-### 3. Clinical Features (`clinical_features.tsv`)
+### 2. Clinical Features (`clinical_features.tsv`)
+- Contains sample metadata, response labels, and biomarker features
+- Required columns include: `Run_ID`, `Dataset` (cohort), `Responder` (True/False), `TCGA_Study` (cancer type), `Sample_Treatment`, `ICI_Target`
 
 The clinical features file should contain **139 total features** across 4 categories:
 
@@ -136,42 +132,58 @@ TIDE scores, IPRES signatures, phenotype markers:
 
 ## Quick Start
 
-### Leave-One-Cohort-Out Cross-Validation
+### Leave-One-Group-Out Cross-Validation
 
-Use the provided script (or configuration in launch.json) for comprehensive evaluation across cohorts:
+Use `tune_test.py` for comprehensive evaluation. The `--setting` argument selects the cross-validation strategy:
+
+- `loco` — Leave-One-Cohort-Out
+- `locto` — Leave-One-Cancer-Type-Out
+- `loto` — Leave-One-ICI-Target-Out
+
+All settings require only `--gene_exp_file` and `--clinical_features_file` — sample metadata, labels, and ICI target groups are all read from the clinical features file.
 
 ```bash
-python tune_test_loco.py \
-    --gene_exp_file data/tpm.tsv \
-    --labels_file data/labels.tsv \
-    --model_path model/pretrainer.pt \
+python tune_test.py \
+    --setting loco \
+    --gene_exp_file data/gene_exp.tsv \
     --clinical_features_file data/clinical_features.tsv \
-    --cohorts "Gide_Cell_2019,HugoLo_IPRES_2016,IMvigor210,IMmotion150,Kim_NatMed_2018,Liu_NatMed_2019,Riaz_Nivolumab_2017,VanAllen_antiCTLA4_2015" \
-    --test_cohort "Gide_Cell_2019" \
+    --model_path models/pretrainer.pt \
+    --all_cohorts "Gide_Cell_2019,HugoLo_IPRES_2016,IMVigor210,IMmotion150,Kim_NatMed_2018,Liu_NatMed_2019,Riaz_Nivolumab_2017,VanAllen_antiCTLA4_2015" \
+    --groups "Gide_Cell_2019,HugoLo_IPRES_2016,IMVigor210,IMmotion150,Kim_NatMed_2018,Liu_NatMed_2019,Riaz_Nivolumab_2017,VanAllen_antiCTLA4_2015" \
+    --test_group "Gide_Cell_2019" \
     --treatment_gating_enabled True \
-    --concept_alignment_loss_scale 0.1 \
+    --concept_alignment_loss_scale 0.0 \
     --pathway_consistency_loss_scale 0.05 \
-    --auxiliary_task_loss_scale 0.1 \
+    --auxiliary_task_loss_scale 0.0 \
     --biomarker_attention_enabled False \
     --batch_size 16 \
     --max_epochs 25 \
-    --with_wandb True
+    --mode PFT
 ```
 
-**Key Clinical Arguments:**
+**Key Arguments:**
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--clinical_features_file` | Path to clinical features TSV | None |
-| `--treatment_gating_enabled` | Enable treatment-aware gating | False |
-| `--treatment_gating_hidden_dim` | Hidden dimension for gating network | 32 |
-| `--concept_alignment_loss_scale` | Concept-biomarker alignment weight | 0.0 |
-| `--concept_alignment_mode` | Alignment mode (manual/correlation/learnable) | manual |
-| `--pathway_consistency_loss_scale` | Pathway consistency loss weight | 0.0 |
-| `--auxiliary_task_loss_scale` | Auxiliary task loss weight | 0.0 |
-| `--biomarker_attention_enabled` | Enable biomarker-guided attention | False |
-| `--biomarker_attention_dim` | Attention dimension | 32 |
-| `--biomarker_attention_heads` | Number of attention heads | 4 |
+| `--setting` | CV strategy: `loco`, `locto`, `loto` | `loco` |
+| `--gene_exp_file` | Path to gene expression TSV | `data/gene_exp.tsv` |
+| `--clinical_features_file` | Path to clinical features TSV (required) | `data/clinical_features.tsv` |
+| `--model_path` | Path to pre-trained model | `models/pretrainer.pt` |
+| `--all_cohorts` | Comma-separated cohorts to restrict the data pool | all cohorts |
+| `--groups` | Comma-separated groups to include in the CV pool | all groups |
+| `--test_group` | Single group to test (runs one fold only) | all groups |
+| `--mode` | Fine-tuning mode: `FFT`, `PFT`, `LFT` | `PFT` |
+| `--batch_size` | Batch size | `16` |
+| `--max_epochs` | Maximum training epochs | `100` |
+| `--treatment_gating_enabled` | Enable treatment-aware gating | `False` |
+| `--treatment_gating_hidden_dim` | Hidden dimension for gating network | `32` |
+| `--concept_alignment_loss_scale` | Concept-biomarker alignment weight | `0.0` |
+| `--concept_alignment_mode` | Alignment mode (`manual`/`correlation`/`learnable`) | `manual` |
+| `--pathway_consistency_loss_scale` | Pathway consistency loss weight | `0.0` |
+| `--auxiliary_task_loss_scale` | Auxiliary task loss weight | `0.0` |
+| `--biomarker_attention_enabled` | Enable biomarker-guided attention | `False` |
+| `--biomarker_attention_dim` | Attention dimension | `32` |
+| `--biomarker_attention_heads` | Number of attention heads | `4` |
 
 ---
 
@@ -207,12 +219,12 @@ ft_args = {
 }
 ```
 
-### Strategy 2: Concept-Biomarker Alignment
+### Strategy 2: Concept-Biomarker Alignment *(disabled by default)*
 Aligns COMPASS concepts with external biomarkers using semantic mappings.
 
 ```python
 ft_args = {
-    'concept_alignment_loss_scale': 0.1,
+    'concept_alignment_loss_scale': 0.0,  # disabled
     'concept_alignment_mode': 'manual',  # or 'correlation', 'learnable'
 }
 ```
@@ -226,21 +238,21 @@ ft_args = {
 }
 ```
 
-### Strategy 4: Auxiliary Task Learning
+### Strategy 4: Auxiliary Task Learning *(disabled by default)*
 Multi-task learning on TIDE, IPRES, and phenotype predictions.
 
 ```python
 ft_args = {
-    'auxiliary_task_loss_scale': 0.1,
+    'auxiliary_task_loss_scale': 0.0,  # disabled
 }
 ```
 
-### Strategy 5: Biomarker-Guided Attention
+### Strategy 5: Biomarker-Guided Attention *(disabled by default)*
 Cross-attention mechanism between biomarkers and gene encodings.
 
 ```python
 ft_args = {
-    'biomarker_attention_enabled': True,
+    'biomarker_attention_enabled': False,  # disabled
     'biomarker_attention_dim': 32,
     'biomarker_attention_heads': 4,
 }
@@ -250,12 +262,12 @@ ft_args = {
 
 ## Example Workflows
 
-### Training with All Clinical Strategies
+### Training with Default Strategies
 
 ```python
 from compass import FineTuner, loadcompass
 
-model = loadcompass('./model/pretrainer.pt')
+model = loadcompass('./models/pretrainer.pt')
 
 ft_args = {
     'mode': 'PFT',
@@ -263,14 +275,57 @@ ft_args = {
     'batch_size': 16,
     'max_epochs': 100,
 
-    # Enable all clinical strategies
+    # Strategy 1: Treatment-aware gating (enabled)
     'clinical_features_file': './data/clinical_features.tsv',
     'treatment_gating_enabled': True,
     'treatment_gating_hidden_dim': 32,
+
+    # Strategy 2: Concept-biomarker alignment (disabled)
+    'concept_alignment_loss_scale': 0.0,
+    'concept_alignment_mode': 'manual',
+
+    # Strategy 3: Pathway consistency
+    'pathway_consistency_loss_scale': 0.05,
+
+    # Strategy 4: Auxiliary task learning (disabled)
+    'auxiliary_task_loss_scale': 0.0,
+
+    # Strategy 5: Biomarker-guided attention (disabled)
+    'biomarker_attention_enabled': False,
+    'biomarker_attention_dim': 32,
+    'biomarker_attention_heads': 4,
+}
+
+finetuner = FineTuner(model, **ft_args)
+finetuner.tune(df_tpm, dfy)
+finetuner.save('./models/biocompass.pt')
+```
+
+### Training with All Strategies Enabled
+
+```python
+ft_args = {
+    'mode': 'PFT',
+    'lr': 1e-3,
+    'batch_size': 16,
+    'max_epochs': 100,
+
+    # Strategy 1: Treatment-aware gating
+    'clinical_features_file': './data/clinical_features.tsv',
+    'treatment_gating_enabled': True,
+    'treatment_gating_hidden_dim': 32,
+
+    # Strategy 2: Concept-biomarker alignment
     'concept_alignment_loss_scale': 0.1,
     'concept_alignment_mode': 'manual',
+
+    # Strategy 3: Pathway consistency
     'pathway_consistency_loss_scale': 0.05,
+
+    # Strategy 4: Auxiliary task learning
     'auxiliary_task_loss_scale': 0.1,
+
+    # Strategy 5: Biomarker-guided attention
     'biomarker_attention_enabled': True,
     'biomarker_attention_dim': 32,
     'biomarker_attention_heads': 4,
@@ -278,26 +333,7 @@ ft_args = {
 
 finetuner = FineTuner(model, **ft_args)
 finetuner.tune(df_tpm, dfy)
-finetuner.save('./model/biocompass_full.pt')
-```
-
-### Training with Selected Strategies
-
-```python
-# Example: Only treatment gating + biomarker attention
-ft_args = {
-    'mode': 'PFT',
-    'lr': 1e-3,
-    'batch_size': 16,
-    'max_epochs': 100,
-
-    'clinical_features_file': './data/clinical_features.tsv',
-    'treatment_gating_enabled': True,
-    'biomarker_attention_enabled': True,
-}
-
-finetuner = FineTuner(model, **ft_args)
-finetuner.tune(df_tpm, dfy)
+finetuner.save('./models/biocompass_full.pt')
 ```
 
 ---
