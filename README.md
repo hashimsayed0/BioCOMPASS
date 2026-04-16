@@ -374,7 +374,7 @@ medRxiv (2025). https://www.medrxiv.org/content/10.1101/2025.05.01.25326820
 ```
 Hashim, Sayed, Frank Soboczenski, and Paul Cairns.
 "BioCOMPASS: Integrating Biomarkers into Transformer-Based Immunotherapy Response Prediction."
-arXiv preprint arXiv:2604.00739 (2026).
+arXiv (2026). https://arxiv.org/abs/2604.00739
 ```
 
 ---
